@@ -59,9 +59,6 @@
     <ClCompile Include="stdafx.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="GXdeltaDemo2.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="GXdelta.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
