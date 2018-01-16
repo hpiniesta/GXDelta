@@ -539,6 +539,12 @@ GXdelta::GXdelta() : lru(NULL), lru_size(0)
 
 GXdelta::~GXdelta()
 {
+	if (lru != NULL)
+	{
+		main_buffree(lru[0].blk);
+		free(lru);
+	}
+	lru = NULL;
 }
 
 bool GXdelta::diff(const string & srcFile, const string & dstFile, const string & patchFile)
@@ -547,11 +553,22 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	main_file_init(&pSrcFile);
 	main_file_init(&pDstFile);
 	main_file_init(&pPatchFile);
+	auto cleanUp = [&]()
+	{
+		main_file_close(&pSrcFile);
+		main_file_close(&pDstFile);
+		main_file_close(&pPatchFile);
+	};
 	pPatchFile.filename = patchFile.c_str();
 
 	pDstFile.flags = RD_FIRST | RD_MAININPUT;
 	pDstFile.filename = dstFile.c_str();
-	main_file_open(&pDstFile, pDstFile.filename, XO_READ);
+	int ret = EXIT_SUCCESS;
+	if (ret = main_file_open(&pDstFile, pDstFile.filename, XO_READ))
+	{
+		cleanUp();
+		return ret;
+	}
 
 	pSrcFile.flags = RD_FIRST;
 	pSrcFile.filename = srcFile.c_str();
@@ -566,17 +583,26 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	config.sprevsz = XD3_DEFAULT_SPREVSZ;
 	config.iopt_size = XD3_DEFAULT_IOPT_SIZE;
 	xd3_stream stream;
-	int ret = xd3_config_stream(&stream, &config);
+	if (ret = xd3_config_stream(&stream, &config))
+	{
+		cleanUp();
+		return ret;
+	}
 	xd3_source source;
 	memset(&source, 0, sizeof(source));
-	main_set_source(&stream, &pSrcFile, &source);
+	if (ret = main_set_source(&stream, &pSrcFile, &source))
+	{
+		cleanUp();
+		return ret;
+	}
 	uint8_t* main_bdata = (uint8_t*)main_bufalloc(config.winsize);
 	size_t   nread = 0;
 	do 
 	{
 		xoff_t input_remain = XOFF_T_MAX - pSrcFile.nread;
 		usize_t try_read = (usize_t)xd3_min((xoff_t)config.winsize, input_remain);
-		main_file_read(&pDstFile, main_bdata, try_read, &nread);
+		if (ret = main_file_read(&pDstFile, main_bdata, try_read, &nread))
+			goto done;
 		if (nread < try_read)
 		{
 			stream.flags |= XD3_FLUSH;
@@ -628,9 +654,7 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 		}
 	} while (nread == config.winsize);
 done:
-	main_file_close(&pDstFile);
-	main_file_close(&pSrcFile);
-	main_file_close(&pPatchFile);
+	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
 		return EXIT_FAILURE;
@@ -638,7 +662,7 @@ done:
 	xd3_free_stream(&stream);
 	main_buffree(main_bdata);
 	main_bdata = NULL;
-	return EXIT_SUCCESS;
+	return ret;
 }
 
 bool GXdelta::patch(const string & iFileName, const string & sFileName, const string & oFileName)
@@ -648,9 +672,21 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	main_file_init(&oFile);
 	main_file_init(&sFile);
 
+	auto cleanUp = [&]()
+	{
+		main_file_close(&iFile);
+		main_file_close(&sFile);
+		main_file_close(&oFile);
+	};
+
 	iFile.flags = RD_FIRST | RD_MAININPUT | RD_NONEXTERNAL;
 	iFile.filename = iFileName.c_str();
-	main_file_open(&iFile, iFile.filename, XO_READ);
+	int ret = EXIT_FAILURE;
+	if (ret = main_file_open(&iFile, iFile.filename, XO_READ))
+	{
+		cleanUp();
+		return ret;
+	}
 
 	sFile.flags = RD_FIRST;
 	sFile.filename = sFileName.c_str();
@@ -666,7 +702,11 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	config.iopt_size = XD3_DEFAULT_IOPT_SIZE;
 	config.flags = XD3_ADLER32;
 	xd3_stream stream;
-	int ret = xd3_config_stream(&stream, &config);
+	if (ret = xd3_config_stream(&stream, &config))
+	{
+		cleanUp();
+		return ret;
+	}
 	xd3_source source;
 	memset(&source, 0, sizeof(source));
 	uint8_t* main_bdata = (uint8_t*)main_bufalloc(config.winsize);
@@ -736,9 +776,7 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 		}
 	} while (nread == config.winsize);
 done:
-	main_file_close(&iFile);
-	main_file_close(&sFile);
-	main_file_close(&oFile);
+	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
 		return EXIT_FAILURE;
@@ -746,7 +784,7 @@ done:
 	xd3_free_stream(&stream);
 	main_buffree(main_bdata);
 	main_bdata = NULL;
-	return EXIT_SUCCESS;
+	return ret;
 }
 
 int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source * source)

@@ -4,7 +4,6 @@
 #include "xdelta3-internal.h"
 using namespace std;
 
-
 typedef struct _main_blklru      main_blklru;
 typedef struct _main_blklru_list main_blklru_list;
 
