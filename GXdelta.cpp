@@ -28,15 +28,6 @@ int main_file_read(main_file  *ifile,
 	size_t      size,
 	size_t     *nread);
 
-xoff_t xd3_xoff_roundup(xoff_t x)
-{
-	xoff_t i = 1;
-	while (x > i) {
-		i <<= 1U;
-	}
-	return i;
-}
-
 static int get_errno(void)
 {
 	DWORD err_num = GetLastError();
@@ -691,7 +682,6 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 {
 	main_blklru_list  lru_list;
 	main_blklru_list_init(&lru_list);
-	xoff_t option_srcwinsz = xd3_xoff_roundup(XD3_DEFAULT_SRCWINSZ);
 	lru = (main_blklru *)malloc(MAX_LRU_SIZE * sizeof(main_blklru));
 	if (NULL == lru)
 	{
@@ -699,6 +689,7 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 	}
 	memset(lru, 0, sizeof(lru[0]) * MAX_LRU_SIZE);
 	/* Allocate the entire buffer. */
+	xoff_t option_srcwinsz = XD3_DEFAULT_SRCWINSZ;
 	if ((lru[0].blk = (uint8_t*)main_bufalloc(option_srcwinsz)) == NULL)
 	{
 		return ENOMEM;
@@ -750,7 +741,14 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 			main_blklru_list_push_back(&lru_list, &lru[i]);
 		}
 	}
-	ret = xd3_set_source(stream, source);
+	if (sfile->size_known)
+	{
+		ret = xd3_set_source_and_size(stream, source, source_size);
+	}
+	else
+	{
+		ret = xd3_set_source(stream, source);
+	}
 	return 0;
 }
 
@@ -771,9 +769,6 @@ int GXdelta::main_getblk_lru(xd3_source * source, xoff_t blkno, main_blklru ** b
 	{
 		return XD3_TOOFARBACK;
 	}
-	idx = blkno % lru_size;
-	blru = &lru[idx];
-
 	(*is_new) = 1;
 	(*blrup) = blru;
 	blru->blkno = XD3_INVALID_OFFSET;

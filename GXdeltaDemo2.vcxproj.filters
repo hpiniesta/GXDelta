@@ -51,9 +51,6 @@
     <ClInclude Include="xdelta3-djw.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="xdelta3-lzma.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
