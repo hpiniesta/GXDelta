@@ -119,65 +119,6 @@ static usize_t main_get_winsize(main_file *ifile)
 	return xd3_max(size, XD3_ALLOCSIZE);
 }
 
-const char* main_apphead_string(const char* x)
-{
-	const char *y;
-
-	if (x == NULL) { return ""; }
-
-	if (strcmp(x, "/dev/stdin") == 0 ||
-		strcmp(x, "/dev/stdout") == 0 ||
-		strcmp(x, "/dev/stderr") == 0) {
-		return "-";
-	}
-
-	// TODO: this is not portable
-	return (y = strrchr(x, '/')) == NULL ? x : y + 1;
-}
-
-int main_set_appheader(xd3_stream *stream, main_file *input, main_file *sfile)
-{
-	static uint8_t*        appheader_used = NULL;
-	/* The user may disable the application header.  Once the appheader
-	* is set, this disables setting it again. */
-	//if (appheader_used || !option_use_appheader) { return 0; }
-
-	/* The user may specify the application header, otherwise format the
-	default header. */
-	/*if (option_appheader)
-	{
-		appheader_used = option_appheader;
-	}
-	else*/
-	{
-		const char *iname = main_apphead_string(input->filename);
-		const char *icomp = (input->compressor == NULL) ? "" : input->compressor->ident;
-		usize_t len = (usize_t)strlen(iname) + (usize_t)strlen(icomp) + 2;
-
-		const char *sname;
-		const char *scomp;
-		if (sfile->filename != NULL)
-		{
-			sname = main_apphead_string(sfile->filename);
-			scomp = (sfile->compressor == NULL) ? "" : sfile->compressor->ident;
-			len += (usize_t)strlen(sname) + (usize_t)strlen(scomp) + 2;
-		}
-		else
-		{
-			sname = scomp = "";
-		}
-
-		if ((appheader_used = (uint8_t*)malloc(len)) == NULL)
-		{
-			return ENOMEM;
-		}
-	}
-
-	xd3_set_appheader(stream, appheader_used, (usize_t)strlen((char*)appheader_used));
-
-	return 0;
-}
-
 int main_open_output(xd3_stream *stream, main_file *ofile)
 {
 	if (ofile->filename == NULL)
@@ -508,7 +449,6 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 		{
 			stream.flags |= XD3_FLUSH;
 		}
-		main_set_appheader(&stream, &pDstFile, &pSrcFile);
 		xd3_avail_input(&stream, main_bdata, nread);
 		if (nread == 0 && stream.current_window > 0)
 		{
