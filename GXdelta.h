@@ -35,7 +35,7 @@ private:
 	int main_read_seek_source(xd3_stream *stream, xd3_source *source, xoff_t blkno);
 	int main_getblk_func(xd3_stream *stream, xd3_source *source, xoff_t blkno);
 private:
-	main_blklru * lru;
+	main_blklru *lru;
 	usize_t lru_size;
 };
 

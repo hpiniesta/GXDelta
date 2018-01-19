@@ -4,14 +4,6 @@
 #include "xdelta3-internal.h"
 #include "xdelta3-list.h"
 
-typedef enum
-{
-	RD_FIRST = (1 << 0),
-	RD_NONEXTERNAL = (1 << 1),
-	RD_DECOMPSET = (1 << 2),
-	RD_MAININPUT = (1 << 3),
-} xd3_read_flags;
-
 #define PRINTHDR_SPECIAL -4378291
 #define XD3_INVALID_OFFSET XOFF_T_MAX
 
@@ -29,22 +21,12 @@ struct _main_extcomp
 	int            flags;
 };
 
-
-
 XD3_MAKELIST(main_blklru_list, main_blklru, link);
 
 int main_file_read(main_file  *ifile,
 	uint8_t    *buf,
 	size_t      size,
 	size_t     *nread);
-
-static int main_read_seek_source(xd3_stream *stream,
-	xd3_source *source,
-	xoff_t      blkno);
-int main_read_primary_input(main_file   *file,
-	uint8_t     *buf,
-	size_t       size,
-	size_t      *nread);
 
 xoff_t xd3_xoff_roundup(xoff_t x)
 {
@@ -98,7 +80,8 @@ int main_file_open(main_file *xfile, const char* name, int mode)
 	}
 	if (!ret)
 	{ 
-		xfile->realname = name; xfile->nread = 0; 
+		xfile->realname = name; 
+		xfile->nread = 0; 
 	}
 	return ret;
 }
@@ -142,11 +125,10 @@ static usize_t main_get_winsize(main_file *ifile)
 		size = (usize_t)xd3_min(file_size, (xoff_t)size);
 	}
 
-	size = xd3_max(size, XD3_ALLOCSIZE);
-	return size;
+	return xd3_max(size, XD3_ALLOCSIZE);
 }
 
-static const char* main_apphead_string(const char* x)
+const char* main_apphead_string(const char* x)
 {
 	const char *y;
 
@@ -162,7 +144,7 @@ static const char* main_apphead_string(const char* x)
 	return (y = strrchr(x, '/')) == NULL ? x : y + 1;
 }
 
-static int main_set_appheader(xd3_stream *stream, main_file *input, main_file *sfile)
+int main_set_appheader(xd3_stream *stream, main_file *input, main_file *sfile)
 {
 	static uint8_t*        appheader_used = NULL;
 	/* The user may disable the application header.  Once the appheader
@@ -177,16 +159,12 @@ static int main_set_appheader(xd3_stream *stream, main_file *input, main_file *s
 	}
 	else*/
 	{
-		const char *iname;
-		const char *icomp;
+		const char *iname = main_apphead_string(input->filename);
+		const char *icomp = (input->compressor == NULL) ? "" : input->compressor->ident;
+		usize_t len = (usize_t)strlen(iname) + (usize_t)strlen(icomp) + 2;
+
 		const char *sname;
 		const char *scomp;
-		usize_t len;
-
-		iname = main_apphead_string(input->filename);
-		icomp = (input->compressor == NULL) ? "" : input->compressor->ident;
-		len = (usize_t)strlen(iname) + (usize_t)strlen(icomp) + 2;
-
 		if (sfile->filename != NULL)
 		{
 			sname = main_apphead_string(sfile->filename);
@@ -198,19 +176,9 @@ static int main_set_appheader(xd3_stream *stream, main_file *input, main_file *s
 			sname = scomp = "";
 		}
 
-		if ((appheader_used = (uint8_t*)main_malloc(len)) == NULL)
+		if ((appheader_used = (uint8_t*)malloc(len)) == NULL)
 		{
 			return ENOMEM;
-		}
-
-		if (sfile->filename == NULL)
-		{
-			snprintf_func((char*)appheader_used, len, "%s/%s", iname, icomp);
-		}
-		else
-		{
-			snprintf_func((char*)appheader_used, len, "%s/%s/%s/%s",
-				iname, icomp, sname, scomp);
 		}
 	}
 
@@ -219,41 +187,16 @@ static int main_set_appheader(xd3_stream *stream, main_file *input, main_file *s
 	return 0;
 }
 
-static void* main_malloc1(size_t size)
-{
-	void* r = malloc(size);
-	return r;
-}
-
-static void* main_alloc(void   *opaque,
-	size_t  items,
-	usize_t  size)
-{
-	return main_malloc1(items * size);
-}
-
-IF_DEBUG(static int main_mallocs = 0;)
-void* main_malloc(size_t size)
-{
-	void *r = main_malloc1(size);
-	if (r)
-	{
-		IF_DEBUG(main_mallocs += 1);
-	}
-	return r;
-}
-
 int main_open_output(xd3_stream *stream, main_file *ofile)
 {
-	int ret;
-
 	if (ofile->filename == NULL)
 	{
 		return 0;
 	}
 	else
 	{
-		if ((ret = main_file_open(ofile, ofile->filename, XO_WRITE)))
+		int ret;
+		if (ret = main_file_open(ofile, ofile->filename, XO_WRITE))
 		{
 			return ret;
 		}
@@ -328,14 +271,9 @@ int xd3_win32_io(HANDLE file, uint8_t *buf, size_t size,
 
 int main_file_write(main_file *ofile, uint8_t *buf, usize_t size, const char *msg)
 {
-	int ret = 0;
+	int ret = xd3_win32_io(ofile->file, buf, size, 0, NULL);
 
-	ret = xd3_win32_io(ofile->file, buf, size, 0, NULL);
-
-	if (ret)
-	{
-	}
-	else
+	if (!ret)
 	{
 		ofile->nwrite += size;
 	}
@@ -348,13 +286,9 @@ int main_file_read(main_file  *ifile,
 	size_t      size,
 	size_t     *nread)
 {
-	int ret = 0;
-	ret = xd3_win32_io(ifile->file, buf, size, 1 /* is_read */, nread);
+	int ret = xd3_win32_io(ifile->file, buf, size, 1 /* is_read */, nread);
 
-	if (ret)
-	{
-	}
-	else
+	if (!ret)
 	{
 		ifile->nread += (*nread);
 	}
@@ -371,7 +305,7 @@ void main_buffree(void *ptr)
 	VirtualFree(ptr, 0, MEM_RELEASE);
 }
 
-static int main_file_seek(main_file *xfile, xoff_t pos)
+int main_file_seek(main_file *xfile, xoff_t pos)
 {
 	int ret = 0;
 # if (_WIN32_WINNT >= 0x0500)
@@ -389,19 +323,6 @@ static int main_file_seek(main_file *xfile, xoff_t pos)
 	}
 # endif
 	return ret;
-}
-
-int main_read_primary_input(main_file   *file,
-	uint8_t     *buf,
-	size_t       size,
-	size_t      *nread)
-{
-	return main_file_read(file, buf, size, nread);
-}
-
-void main_free1(void *opaque, void *ptr)
-{
-	free(ptr);
 }
 
 /* This array of compressor types is compiled even if EXTERNAL_COMPRESSION is
@@ -464,7 +385,7 @@ static void main_get_appheader_params(main_file *file, char **parsed,
 
 				XD3_ASSERT(file->filename_copy == NULL);
 				file->filename_copy =
-					(char*)main_malloc(dlen + 2 + (usize_t)strlen(file->filename));
+					(char*)malloc(dlen + 2 + (usize_t)strlen(file->filename));
 
 				strncpy(file->filename_copy, other->filename, dlen);
 				file->filename_copy[dlen] = '/';
@@ -478,7 +399,6 @@ static void main_get_appheader_params(main_file *file, char **parsed,
 	/* Set the compressor, initiate de/recompression later. */
 	if (file->compressor == NULL && *parsed[1] != 0)
 	{
-		file->flags |= RD_DECOMPSET;
 		file->compressor = main_get_compressor(parsed[1]);
 	}
 }
@@ -559,29 +479,20 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 		main_file_close(&pDstFile);
 		main_file_close(&pPatchFile);
 	};
+	pSrcFile.filename = srcFile.c_str();
 	pPatchFile.filename = patchFile.c_str();
-
-	pDstFile.flags = RD_FIRST | RD_MAININPUT;
 	pDstFile.filename = dstFile.c_str();
 	int ret = EXIT_SUCCESS;
 	if (ret = main_file_open(&pDstFile, pDstFile.filename, XO_READ))
 	{
-		cleanUp();
 		return ret;
 	}
-
-	pSrcFile.flags = RD_FIRST;
-	pSrcFile.filename = srcFile.c_str();
 
 	xd3_config config;
 	xd3_init_config(&config, 0);
 	config.smatch_cfg = XD3_SMATCH_FAST;
-	config.alloc = main_alloc;
-	config.freef = main_free1;
 	config.winsize = main_get_winsize(&pDstFile);
 	config.flags = XD3_ADLER32;
-	config.sprevsz = XD3_DEFAULT_SPREVSZ;
-	config.iopt_size = XD3_DEFAULT_IOPT_SIZE;
 	xd3_stream stream;
 	if (ret = xd3_config_stream(&stream, &config))
 	{
@@ -599,8 +510,7 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	size_t   nread = 0;
 	do 
 	{
-		xoff_t input_remain = XOFF_T_MAX - pSrcFile.nread;
-		usize_t try_read = (usize_t)xd3_min((xoff_t)config.winsize, input_remain);
+		usize_t try_read = config.winsize;
 		if (ret = main_file_read(&pDstFile, main_bdata, try_read, &nread))
 			goto done;
 		if (nread < try_read)
@@ -636,7 +546,6 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 			if (ret == PRINTHDR_SPECIAL)
 			{
 				xd3_abort_stream(&stream);
-				return EXIT_SUCCESS;
 				goto done;
 			}
 			ret = 0;
@@ -679,27 +588,19 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 		main_file_close(&oFile);
 	};
 
-	iFile.flags = RD_FIRST | RD_MAININPUT | RD_NONEXTERNAL;
 	iFile.filename = iFileName.c_str();
 	int ret = EXIT_FAILURE;
 	if (ret = main_file_open(&iFile, iFile.filename, XO_READ))
 	{
-		cleanUp();
 		return ret;
 	}
 
-	sFile.flags = RD_FIRST;
 	sFile.filename = sFileName.c_str();
-
 	oFile.filename = oFileName.c_str();
 	xd3_config config;
 	xd3_init_config(&config, 0);
 	config.smatch_cfg = XD3_SMATCH_FAST;
-	config.alloc = main_alloc;
-	config.freef = main_free1;
 	config.winsize = main_get_winsize(&iFile);
-	config.sprevsz = XD3_DEFAULT_SPREVSZ;
-	config.iopt_size = XD3_DEFAULT_IOPT_SIZE;
 	config.flags = XD3_ADLER32;
 	xd3_stream stream;
 	if (ret = xd3_config_stream(&stream, &config))
@@ -713,8 +614,7 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	size_t   nread = 0;
 	do 
 	{
-		xoff_t input_remain = XOFF_T_MAX - iFile.nread;
-		usize_t try_read = (usize_t)xd3_min((xoff_t)config.winsize, input_remain);
+		usize_t try_read = config.winsize;
 		main_file_read(&iFile, main_bdata, try_read, &nread);
 		if (nread < try_read)
 		{
@@ -791,10 +691,9 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 {
 	main_blklru_list  lru_list;
 	main_blklru_list_init(&lru_list);
-	lru = NULL;
 	xoff_t option_srcwinsz = xd3_xoff_roundup(XD3_DEFAULT_SRCWINSZ);
-	if ((lru = (main_blklru*)main_malloc(MAX_LRU_SIZE *
-		sizeof(main_blklru))) == NULL)
+	lru = (main_blklru *)malloc(MAX_LRU_SIZE * sizeof(main_blklru));
+	if (NULL == lru)
 	{
 		return ENOMEM;
 	}
@@ -817,8 +716,8 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 	source->curblkno = UINT32_MAX;
 	source->curblk = NULL;
 	source->max_winsize = XD3_DEFAULT_SRCWINSZ;
-	int ret;
-	if ((ret = main_getblk_func(stream, source, 0)) != 0)
+	int ret = main_getblk_func(stream, source, 0);
+	if (ret != 0)
 	{
 		return ret;
 	}
@@ -857,13 +756,11 @@ int GXdelta::main_set_source(xd3_stream * stream, main_file * sfile, xd3_source 
 
 int GXdelta::main_getblk_lru(xd3_source * source, xoff_t blkno, main_blklru ** blrup, int * is_new)
 {
-	main_blklru *blru = NULL;
-
 	(*is_new) = 0;
 
 	/* Direct lookup assumes sequential scan w/o skipping blocks. */
 	int idx = blkno % lru_size;
-	blru = &lru[idx];
+	main_blklru *blru = &lru[idx];
 	if (blru->blkno == blkno)
 	{
 		(*blrup) = blru;
@@ -940,7 +837,7 @@ int GXdelta::main_read_seek_source(xd3_stream * stream, xd3_source * source, xof
 			XD3_ASSERT(is_new);
 			blru->blkno = skip_blkno;
 
-			if ((ret = main_read_primary_input(sfile,
+			if ((ret = main_file_read(sfile,
 				(uint8_t*)blru->blk,
 				source->blksize,
 				&nread)))
@@ -950,18 +847,12 @@ int GXdelta::main_read_seek_source(xd3_stream * stream, xd3_source * source, xof
 
 			if (nread != source->blksize)
 			{
-				IF_DEBUG1(DP(RINT "[getblk] short skip block nread = %"Z"u\n",
-					nread));
 				stream->msg = "non-seekable input is short";
 				return XD3_INVALID_INPUT;
 			}
 
 			sfile->source_position += nread;
 			blru->size = nread;
-
-			IF_DEBUG1(DP(RINT "[getblk] skip blkno %"Q"u size %"W"u\n",
-				skip_blkno, blru->size));
-
 			XD3_ASSERT(sfile->source_position <= pos);
 		}
 	}
@@ -976,7 +867,6 @@ int GXdelta::main_getblk_func(xd3_stream * stream, xd3_source * source, xoff_t b
 	main_file *sfile = (main_file*)source->ioh;
 	main_blklru *blru;
 	int is_new;
-	size_t nread = 0;
 
 	if (ret = main_getblk_lru(source, blkno, &blru, &is_new))
 	{
@@ -996,15 +886,15 @@ int GXdelta::main_getblk_func(xd3_stream * stream, xd3_source * source, xoff_t b
 		/* Only try to seek when the position is wrong.  This means the
 		* decoder will fail when the source buffer is too small, but
 		* only when the input is non-seekable. */
-		if ((ret = main_read_seek_source(stream, source, blkno)))
+		if (ret = main_read_seek_source(stream, source, blkno))
 		{
 			return ret;
 		}
 	}
 
 	XD3_ASSERT(sfile->source_position == pos);
-
-	if ((ret = main_read_primary_input(sfile,
+	size_t nread = 0;
+	if ((ret = main_file_read(sfile,
 		(uint8_t*)blru->blk,
 		source->blksize,
 		&nread)))
