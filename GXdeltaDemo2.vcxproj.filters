@@ -33,22 +33,13 @@
     <ClInclude Include="xdelta3-list.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="xdelta3-hash.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="xdelta3-cfgs.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="xdelta3-decode.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="xdelta3-second.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="xdelta3-fgk.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="xdelta3-djw.h">
+    <ClInclude Include="xdelta3-hash.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
