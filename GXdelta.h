@@ -27,8 +27,8 @@ public:
 	GXdelta();
 	~GXdelta();
 public:
-	bool diff(const string &srcFile, const string &dstFile, const string &patchFile);
-	bool patch(const string &iFileName, const string &sFileName, const string &oFileName);
+	int diff(const string &srcFile, const string &dstFile, const string &patchFile);
+	int patch(const string &iFileName, const string &sFileName, const string &oFileName);
 private:
 	int main_set_source(xd3_stream *stream, main_file *sfile, xd3_source *source);
 	int main_getblk_lru(xd3_source *source, xoff_t blkno, main_blklru** blrup, int *is_new);

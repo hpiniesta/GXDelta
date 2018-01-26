@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <vector>
 #include "GXdelta.h"
 #include "xdelta3.h"
 #include "xdelta3-internal.h"
@@ -6,6 +7,22 @@
 
 #define PRINTHDR_SPECIAL -4378291
 #define XD3_INVALID_OFFSET XOFF_T_MAX
+
+void GPrintf(char *frm, ...)
+{
+	va_list ap;
+	va_start(ap, frm);
+	int len = _vscprintf(frm, ap);
+	if (len > 0)
+	{
+		std::string var_str;
+		std::vector<char> buf(len + 1);
+		vsprintf(&buf.front(), frm, ap);
+		var_str.assign(buf.begin(), buf.end() - 1);
+		OutputDebugString(var_str.c_str());
+	}
+	va_end(ap);
+}
 
 struct _main_extcomp
 {
@@ -127,8 +144,8 @@ int main_open_output(xd3_stream *stream, main_file *ofile)
 	}
 	else
 	{
-		int ret;
-		if (ret = main_file_open(ofile, ofile->filename, XO_WRITE))
+		int ret = main_file_open(ofile, ofile->filename, XO_WRITE);
+		if (ret)
 		{
 			return ret;
 		}
@@ -272,7 +289,7 @@ GXdelta::~GXdelta()
 	lru = NULL;
 }
 
-bool GXdelta::diff(const string & srcFile, const string & dstFile, const string & patchFile)
+int GXdelta::diff(const string & srcFile, const string & dstFile, const string & patchFile)
 {
 	main_file pSrcFile, pDstFile, pPatchFile;
 	main_file_init(&pSrcFile);
@@ -290,6 +307,7 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	int ret = EXIT_SUCCESS;
 	if (ret = main_file_open(&pDstFile, pDstFile.filename, XO_READ))
 	{
+		GPrintf("main_file_open failure, fileName: %s, error: %d", pDstFile.filename, ret);
 		return ret;
 	}
 
@@ -302,6 +320,7 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	if (ret = xd3_config_stream(&stream, &config))
 	{
 		cleanUp();
+		GPrintf("config_stream failure, error: %d", ret);
 		return ret;
 	}
 	xd3_source source;
@@ -309,6 +328,7 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	if (ret = main_set_source(&stream, &pSrcFile, &source))
 	{
 		cleanUp();
+		GPrintf("main_set_source failure, error: %d", ret);
 		return ret;
 	}
 	uint8_t* main_bdata = (uint8_t*)main_bufalloc(config.winsize);
@@ -317,7 +337,10 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 	{
 		usize_t try_read = config.winsize;
 		if (ret = main_file_read(&pDstFile, main_bdata, try_read, &nread))
+		{
+			GPrintf("main_file_read failure, fileName: %s, error: %d", pDstFile.filename, ret);
 			goto done;
+		}
 		if (nread < try_read)
 		{
 			stream.flags |= XD3_FLUSH;
@@ -341,10 +364,12 @@ bool GXdelta::diff(const string & srcFile, const string & dstFile, const string 
 		{
 			if (!main_file_isopen(&pPatchFile) && (ret = main_open_output(&stream, &pPatchFile)) != 0)
 			{
+				GPrintf("main_open_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if ((ret = main_write_output(&stream, &pPatchFile)) && (ret != PRINTHDR_SPECIAL))
 			{
+				GPrintf("main_write_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if (ret == PRINTHDR_SPECIAL)
@@ -370,6 +395,7 @@ done:
 	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
+		GPrintf("xd3_close_stream failure, error:%d", ret);
 		return EXIT_FAILURE;
 	}
 	xd3_free_stream(&stream);
@@ -378,7 +404,7 @@ done:
 	return ret;
 }
 
-bool GXdelta::patch(const string & iFileName, const string & sFileName, const string & oFileName)
+int GXdelta::patch(const string & iFileName, const string & sFileName, const string & oFileName)
 {
 	main_file iFile, oFile, sFile;
 	main_file_init(&iFile);
@@ -396,6 +422,7 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	int ret = EXIT_FAILURE;
 	if (ret = main_file_open(&iFile, iFile.filename, XO_READ))
 	{
+		GPrintf("main_file_open failure, fileName: %s, error: %d", iFile.filename, ret);
 		return ret;
 	}
 
@@ -410,6 +437,7 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	if (ret = xd3_config_stream(&stream, &config))
 	{
 		cleanUp();
+		GPrintf("config_stream failure, error: %d", ret);
 		return ret;
 	}
 	xd3_source source;
@@ -419,7 +447,11 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 	do 
 	{
 		usize_t try_read = config.winsize;
-		main_file_read(&iFile, main_bdata, try_read, &nread);
+		if (ret = main_file_read(&iFile, main_bdata, try_read, &nread))
+		{
+			GPrintf("main_file_read failure, fileName: %s, error: %d", iFile.filename, ret);
+			goto done;
+		}
 		if (nread < try_read)
 		{
 			stream.flags |= XD3_FLUSH;
@@ -441,6 +473,7 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 			if ((sFile.filename != NULL) &&
 				(ret = main_set_source(&stream, &sFile, &source)))
 			{
+				GPrintf("main_set_source failure, error: %d", ret);
 				return EXIT_FAILURE;
 			}
 		}
@@ -451,17 +484,18 @@ bool GXdelta::patch(const string & iFileName, const string & sFileName, const st
 		{
 			if (!main_file_isopen(&oFile) && (ret = main_open_output(&stream, &oFile)) != 0)
 			{
+				GPrintf("main_open_output failure, fileName: %s, error: %d", oFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if ((ret = main_write_output(&stream, &oFile)) && (ret != PRINTHDR_SPECIAL))
 			{
+				GPrintf("main_write_output failure, fileName: %s, error: %d", oFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if (ret == PRINTHDR_SPECIAL)
 			{
 				xd3_abort_stream(&stream);
 				return EXIT_SUCCESS;
-				goto done;
 			}
 			ret = 0;
 			xd3_consume_output(&stream);
@@ -481,6 +515,7 @@ done:
 	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
+		GPrintf("xd3_close_stream failure, error:%d", ret);
 		return EXIT_FAILURE;
 	}
 	xd3_free_stream(&stream);
