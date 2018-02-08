@@ -1,5 +1,5 @@
 #pragma once
-#include <xstring>
+#include <string>
 #include "xdelta3.h"
 #include "xdelta3-internal.h"
 using namespace std;
