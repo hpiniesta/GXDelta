@@ -20,12 +20,6 @@
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifndef WIFEXITED
-#   define WIFEXITED(stat)  (((*((int *) &(stat))) & 0xff) == 0)
-#endif
-#ifndef WEXITSTATUS
-#   define WEXITSTATUS(stat) (((*((int *) &(stat))) >> 8) & 0xff)
-#endif
 #ifndef S_ISREG
 //#   ifdef S_IFREG
 //#       define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
@@ -38,31 +32,6 @@
 static STARTUPINFO winStartupInfo;
 #endif
 
-#define DEFAULT_VERBOSE 0
-
-/* Program options: various command line flags and options. */
-static int         option_stdout             = 0;
-static int         option_force              = 0;
-static int         option_verbose            = DEFAULT_VERBOSE;
-static int         option_quiet              = 0;
-static int         option_use_appheader      = 1;
-static uint8_t*    option_appheader          = NULL;
-static int         option_use_secondary      = 1;
-static const char* option_secondary          = NULL;
-static int         option_use_checksum       = 1;
-static const char* option_smatch_config      = NULL;
-static int         option_no_compress        = 0;
-static int         option_no_output          = 0; /* do not write output */
-static const char *option_source_filename    = NULL;
-
-static int         option_level              = XD3_DEFAULT_LEVEL;
-static usize_t     option_iopt_size          = XD3_DEFAULT_IOPT_SIZE;
-static usize_t     option_winsize            = XD3_DEFAULT_WINSIZE;
-
-/* option_srcwinsz is restricted to [16kB, 2GB] when usize_t is 32 bits. */
-static xoff_t      option_srcwinsz           = XD3_DEFAULT_SRCWINSZ;
-static usize_t     option_sprevsz            = XD3_DEFAULT_SPREVSZ;
-
 #define PRINTHDR_SPECIAL -4378291
 #define XD3_INVALID_OFFSET XOFF_T_MAX
 
@@ -71,8 +40,8 @@ static usize_t     option_sprevsz            = XD3_DEFAULT_SPREVSZ;
 		      O_RDONLY : O_WRONLY | O_CREAT | O_TRUNC)
 #define XOPEN_MODE   (xfile->mode == XO_READ ? 0 : 0666)
 #define XF_ERROR(op, name, ret) \
-  do { if (!option_quiet) { XPR(NT "file %s failed: %s: %s: %s\n", (op), \
-       XOPEN_OPNAME, (name), xd3_mainerror (ret)); } } while (0)
+  do { XPR(NT "file %s failed: %s: %s: %s\n", (op), \
+       XOPEN_OPNAME, (name), xd3_mainerror (ret)); } while (0)
 
 #if XD3_STDIO
 #define XFNO(f) fileno(f->file)
@@ -155,7 +124,8 @@ void xprintf (const char *fmt, ...)
   }
 }
 
-const char* xd3_mainerror(int err_num) {
+const char* xd3_mainerror(int err_num) 
+{
 #ifndef _WIN32
 	const char* x = xd3_strerror (err_num);
 	if (x != NULL)
@@ -233,9 +203,6 @@ int main_file_open (main_file *xfile, const char* name, int mode)
     {
       return XD3_INVALID;
     }
-
-  IF_DEBUG1(DP(RINT "[main] open source %s\n", name));
-
 #if XD3_STDIO
   xfile->file = fopen (name, XOPEN_STDIO);
 
@@ -260,7 +227,7 @@ int main_file_open (main_file *xfile, const char* name, int mode)
 			   NULL,
 			   (mode == XO_READ) ?
 			   OPEN_EXISTING :
-			   (option_force ? CREATE_ALWAYS : CREATE_NEW),
+			   CREATE_ALWAYS,
 			   FILE_ATTRIBUTE_NORMAL,
 			   NULL);
   if (xfile->file == INVALID_HANDLE_VALUE)
@@ -317,63 +284,10 @@ int main_file_stat (main_file *xfile, xoff_t *size)
   return ret;
 }
 
-static const char* main_format_bcnt (xoff_t r, shortbuf *buf)
+static usize_t main_get_winsize (main_file *ifile) 
 {
-  static const char* fmts[] = { "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-  usize_t i;
-
-  for (i = 0; i < SIZEOF_ARRAY(fmts) - 1; i += 1)
-    {
-      xoff_t new_r;
-
-      if (r == 0)
-	{
-	  short_sprintf (*buf, "0 %s", fmts[i]);
-	  return buf->buf;
-	}
-
-      if (r >= 1 && r < 10)
-	{
-	  short_sprintf (*buf, "%.2f %s", (double) r, fmts[i]);
-	  return buf->buf;
-	}
-
-      if (r >= 10 && r < 100)
-	{
-	  short_sprintf (*buf, "%.1f %s", (double) r, fmts[i]);
-	  return buf->buf;
-	}
-
-      if (r >= 100 && r < 1000)
-	{
-	  short_sprintf (*buf, "%"Q"u %s", r, fmts[i]);
-	  return buf->buf;
-	}
-
-      new_r = r / 1024;
-
-      if (new_r < 10)
-	{
-	  short_sprintf (*buf, "%.2f %s", (double) r / 1024.0, fmts[i + 1]);
-	  return buf->buf;
-	}
-
-      if (new_r < 100)
-	{
-	  short_sprintf (*buf, "%.1f %s", (double) r / 1024.0, fmts[i + 1]);
-	  return buf->buf;
-	}
-
-      r = new_r;
-    }
-  XD3_ASSERT (0);
-  return "";
-}
-
-static usize_t main_get_winsize (main_file *ifile) {
   xoff_t file_size = 0;
-  usize_t size = option_winsize;
-  static shortbuf iszbuf;
+  usize_t size = XD3_DEFAULT_WINSIZE;
 
   if (main_file_stat (ifile, &file_size) == 0)
     {
@@ -381,14 +295,6 @@ static usize_t main_get_winsize (main_file *ifile) {
     }
 
   size = xd3_max (size, XD3_ALLOCSIZE);
-
-  if (option_verbose > 1)
-    {
-      XPR(NT "input %s window size %s\n",
-	  ifile->filename,
-	  main_format_bcnt (size, &iszbuf));
-    }
-
   return size;
 }
 
@@ -400,77 +306,29 @@ int main_file_exists (main_file *xfile)
 
 static int main_open_output (xd3_stream *stream, main_file *ofile)
 {
-  int ret;
-
-  if (option_no_output)
-    {
-      return 0;
-    }
-
   if (ofile->filename == NULL)
     {
       XSTDOUT_XF (ofile);
-
-      if (option_verbose > 1)
-	{
-	  XPR(NT "using standard output: %s\n", ofile->filename);
-	}
     }
   else
     {
       /* Stat the file to check for overwrite. */
-      if (option_force == 0 && main_file_exists (ofile))
+      if (main_file_exists (ofile))
 	{
-	  if (!option_quiet)
-	    {
-	      XPR(NT "to overwrite output file specify -f: %s\n",
-		  ofile->filename);
-	    }
 	  return EEXIST;
 	}
-
+	  int ret;
       if ((ret = main_file_open (ofile, ofile->filename, XO_WRITE)))
 	{
 	  return ret;
 	}
-
-      if (option_verbose > 1) { XPR(NT "output %s\n", ofile->filename); }
     }
-
-#if EXTERNAL_COMPRESSION
-  /* Do output recompression. */
-  if (ofile->compressor != NULL && option_recompress_outputs == 1)
-    {
-      if (! option_quiet)
-	{
-	  XPR(NT "externally compressed output: %s %s%s > %s\n",
-	      ofile->compressor->recomp_cmdname,
-	      ofile->compressor->recomp_options,
-	      (option_force2 ? " -f" : ""),
-	      ofile->filename);
-	}
-
-      if ((ret = main_recompress_output (ofile)))
-	{
-	  return ret;
-	}
-    }
-#endif
-
   return 0;
 }
 
 static int main_write_output (xd3_stream* stream, main_file *ofile)
 {
   int ret;
-
-  IF_DEBUG1(DP(RINT "[main] write(%s) %"W"u\n bytes", ofile->filename, stream->avail_out));
-
-  if (option_no_output)
-    {
-      return 0;
-    }
-
   if (stream->avail_out > 0 &&
       (ret = main_file_write (ofile, stream->next_out,
 			      stream->avail_out, "write failed")))
@@ -596,9 +454,6 @@ static int xd3_win32_io (HANDLE file, uint8_t *buf, size_t size,
 int main_file_write (main_file *ofile, uint8_t *buf, usize_t size, const char *msg)
 {
   int ret = 0;
-
-  IF_DEBUG1(DP(RINT "[main] write %"W"u\n bytes", size));
-  
 #if XD3_STDIO
   usize_t result;
 
@@ -620,8 +475,6 @@ int main_file_write (main_file *ofile, uint8_t *buf, usize_t size, const char *m
     }
   else
     {
-      if (option_verbose > 5) { XPR(NT "write %s: %"W"u bytes\n",
-				    ofile->filename, size); }
       ofile->nwrite += size;
     }
 
@@ -634,8 +487,7 @@ int main_file_read (main_file  *ifile,
 		size_t     *nread,
 		const char *msg)
 {
-  int ret = 0;
-  IF_DEBUG1(DP(RINT "[main] read %s up to %"Z"u\n", ifile->filename, size));
+	int ret = 0;
 
 #if XD3_STDIO
   size_t result;
@@ -663,8 +515,6 @@ int main_file_read (main_file  *ifile,
     }
   else
     {
-      if (option_verbose > 4) { XPR(NT "read %s: %"Z"u bytes\n",
-				    ifile->filename, (*nread)); }
       ifile->nread += (*nread);
     }
 
@@ -1174,7 +1024,6 @@ int GXdelta::main_read_seek_source(xd3_stream * stream, xd3_source * source, xof
 			XD3_ASSERT(sfile->source_position <= pos);
 		}
 	}
-
 	return 0;
 }
 
