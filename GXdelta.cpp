@@ -67,316 +67,282 @@ static STARTUPINFO winStartupInfo;
   }
 #endif
 
-#if XD3_WIN32
-void GPrintf(char *frm, ...)
-{
-	va_list ap;
-	va_start(ap, frm);
-	int len = _vscprintf(frm, ap);
-	if (len > 0)
-	{
-		std::string var_str;
-		std::vector<char> buf(len + 1);
-		vsprintf(&buf.front(), frm, ap);
-		var_str.assign(buf.begin(), buf.end() - 1);
-		OutputDebugString(var_str.c_str());
-	}
-	va_end(ap);
-}
-#endif
-
-struct _main_extcomp
-{
-	const char    *recomp_cmdname;
-	const char    *recomp_options;
-
-	const char    *decomp_cmdname;
-	const char    *decomp_options;
-
-	const char    *ident;
-	const char    *magic;
-	usize_t        magic_size;
-	int            flags;
-};
-
 XD3_MAKELIST(main_blklru_list, main_blklru, link);
 
-static void (*xprintf_message_func)(const char*msg) = NULL;
-
-void xprintf (const char *fmt, ...)
+//调试信息输出
+void xprintf(const char *fmt, ...)
 {
-  char buf[1000];
-  va_list a;
-  int size;
-  va_start (a, fmt);
-  size = vsnprintf_func (buf, 1000, fmt, a);
-  va_end (a);
-  if (size < 0)
-    {
-      size = sizeof(buf) - 1;
-      buf[size] = 0;
-    }
-  if (xprintf_message_func != NULL) {
-    xprintf_message_func(buf);
-  } else {
-    size_t ignore = fwrite(buf, 1, size, stderr);
-    (void) ignore;
-  }
+	char buf[1000];
+	va_list a;
+	int size;
+	va_start(a, fmt);
+	size = vsnprintf_func(buf, 1000, fmt, a);
+	va_end(a);
+	if (size < 0)
+	{
+		size = sizeof(buf) - 1;
+		buf[size] = 0;
+	}
+#if XD3_WIN32
+	OutputDebugString(buf); //windows上用outputDebugString进行调试
+#else
+	fwrite(buf, 1, size, stderr);
+#endif
 }
 
-const char* xd3_mainerror(int err_num) 
+//通过错误码，找到错误对应的信息
+const char* xd3_mainerror(int err_num)
 {
 #ifndef _WIN32
-	const char* x = xd3_strerror (err_num);
+	const char* x = xd3_strerror(err_num);
 	if (x != NULL)
-	  {
-	    return x;
-	  }
+	{
+		return x;
+	}
 	return strerror(err_num);
 #else
 	static char err_buf[256];
-	const char* x = xd3_strerror (err_num);
+	const char* x = xd3_strerror(err_num);
 	if (x != NULL)
-	  {
-	    return x;
-	  }
-	memset (err_buf, 0, 256);
-	FormatMessage (FORMAT_MESSAGE_FROM_SYSTEM |
-		       FORMAT_MESSAGE_IGNORE_INSERTS,
-		       NULL, err_num,
-		       MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
-		       err_buf, 256, NULL);
+	{
+		return x;
+	}
+	memset(err_buf, 0, 256);
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM |
+		FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL, err_num,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		err_buf, 256, NULL);
 	if (err_buf[0] != 0 && err_buf[strlen(err_buf) - 1] == '\n')
-	  {
-	    err_buf[strlen(err_buf) - 1] = 0;
-	  }
+	{
+		err_buf[strlen(err_buf) - 1] = 0;
+	}
 	return err_buf;
 #endif
 }
 
-static void* main_malloc1 (size_t size)
+static void* main_malloc1(size_t size)
 {
-  void* r = malloc (size);
-  if (r == NULL) { XPR(NT "malloc: %s\n", xd3_mainerror (ENOMEM)); }
-  return r;
+	void* r = malloc(size);
+	if (r == NULL) { XPR(NT "malloc: %s\n", xd3_mainerror(ENOMEM)); }
+	return r;
 }
 
 static int get_errno(void)
 {
 #ifndef _WIN32
-  if (errno == 0)
-    {
-      XPR(NT "you found a bug: expected errno != 0\n");
-      errno = XD3_INTERNAL;
-    }
-  return errno;
+	if (errno == 0)
+	{
+		XPR(NT "you found a bug: expected errno != 0\n");
+		errno = XD3_INTERNAL;
+	}
+	return errno;
 #else
-  DWORD err_num = GetLastError();
-  if (err_num == NO_ERROR)
-    {
-      err_num = XD3_INTERNAL;
-    }
-  return err_num;
+	DWORD err_num = GetLastError();
+	if (err_num == NO_ERROR)
+	{
+		err_num = XD3_INTERNAL;
+	}
+	return err_num;
 #endif
 }
 
 void main_file_init(main_file *xfile)
 {
-  memset (xfile, 0, sizeof (*xfile));
+	memset(xfile, 0, sizeof(*xfile));
 #if XD3_POSIX
-  xfile->file = -1;
+	xfile->file = -1;
 #endif
 #if XD3_WIN32
-  xfile->file = INVALID_HANDLE_VALUE;
+	xfile->file = INVALID_HANDLE_VALUE;
 #endif
 }
 
-int main_file_open (main_file *xfile, const char* name, int mode)
+int main_file_open(main_file *xfile, const char* name, int mode)
 {
-  int ret = 0;
+	int ret = 0;
+	xfile->mode = mode;
 
-  xfile->mode = mode;
-
-  XD3_ASSERT (name != NULL);
-  XD3_ASSERT (! main_file_isopen (xfile));
-  if (name[0] == 0)
-    {
-      return XD3_INVALID;
-    }
+	XD3_ASSERT(name != NULL);
+	XD3_ASSERT(!main_file_isopen(xfile));
+	if (name[0] == 0)
+	{
+		return XD3_INVALID;
+	}
 #if XD3_STDIO
-  xfile->file = fopen (name, XOPEN_STDIO);
+	xfile->file = fopen(name, XOPEN_STDIO);
 
-  ret = (xfile->file == NULL) ? get_errno () : 0;
+	ret = (xfile->file == NULL) ? get_errno() : 0;
 
 #elif XD3_POSIX
-  /* TODO: Should retry this call if interrupted, similar to read/write */
-  if ((ret = open (name, XOPEN_POSIX, XOPEN_MODE)) < 0)
-    {
-      ret = get_errno ();
-    }
-  else
-    {
-      xfile->file = ret;
-      ret = 0;
-    }
+	/* TODO: Should retry this call if interrupted, similar to read/write */
+	if ((ret = open(name, XOPEN_POSIX, XOPEN_MODE)) < 0)
+	{
+		ret = get_errno();
+	}
+	else
+	{
+		xfile->file = ret;
+		ret = 0;
+	}
 
 #elif XD3_WIN32
-  xfile->file = CreateFile(name,
-			   (mode == XO_READ) ? GENERIC_READ : GENERIC_WRITE,
-			   FILE_SHARE_READ,
-			   NULL,
-			   (mode == XO_READ) ?
-			   OPEN_EXISTING :
-			   CREATE_ALWAYS,
-			   FILE_ATTRIBUTE_NORMAL,
-			   NULL);
-  if (xfile->file == INVALID_HANDLE_VALUE)
-    {
-      ret = get_errno ();
-    }
+	xfile->file = CreateFile(name,
+		(mode == XO_READ) ? GENERIC_READ : GENERIC_WRITE,
+		FILE_SHARE_READ,
+		NULL,
+		(mode == XO_READ) ?
+		OPEN_EXISTING :
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,
+		NULL);
+	if (xfile->file == INVALID_HANDLE_VALUE)
+	{
+		ret = get_errno();
+	}
 #endif
-  if (ret) { XF_ERROR ("open", name, ret); }
-  else     { xfile->realname = name; xfile->nread = 0; }
-  return ret;
+	if (ret) { XF_ERROR("open", name, ret); }
+	else { xfile->realname = name; xfile->nread = 0; }
+	return ret;
 }
 
-int main_file_stat (main_file *xfile, xoff_t *size)
+int main_file_stat(main_file *xfile, xoff_t *size)
 {
-  int ret = 0;
+	int ret = 0;
 #if XD3_WIN32
-  if (GetFileType(xfile->file) != FILE_TYPE_DISK)
-    {
-      return -1;
-    }
+	if (GetFileType(xfile->file) != FILE_TYPE_DISK)
+	{
+		return -1;
+	}
 # if (_WIN32_WINNT >= 0x0500)
-  {
-    LARGE_INTEGER li;
-    if (GetFileSizeEx(xfile->file, &li) == 0)
-      {
-	return get_errno ();
-      }
-    *size = li.QuadPart;
-  }
+	{
+		LARGE_INTEGER li;
+		if (GetFileSizeEx(xfile->file, &li) == 0)
+		{
+			return get_errno();
+		}
+		*size = li.QuadPart;
+	}
 # else
-  {
-    DWORD filesize = GetFileSize(xfile->file, NULL);
-    if (filesize == INVALID_FILE_SIZE)
-      {
-	return get_errno ()
-      }
-    *size = filesize;
-  }
+	{
+		DWORD filesize = GetFileSize(xfile->file, NULL);
+		if (filesize == INVALID_FILE_SIZE)
+		{
+			return get_errno()
+		}
+		*size = filesize;
+	}
 # endif
 #else
-  struct stat sbuf;
-  if (fstat (XFNO (xfile), & sbuf) < 0)
-    {
-      ret = get_errno ();
-      return ret;
-    }
+	struct stat sbuf;
+	if (fstat(XFNO(xfile), &sbuf) < 0)
+	{
+		ret = get_errno();
+		return ret;
+	}
 
-  if (! S_ISREG (sbuf.st_mode))
-    {
-      return ESPIPE;
-    }
-  (*size) = sbuf.st_size;
+	if (!S_ISREG(sbuf.st_mode))
+	{
+		return ESPIPE;
+	}
+	(*size) = sbuf.st_size;
 #endif
-  return ret;
+	return ret;
 }
 
-static usize_t main_get_winsize (main_file *ifile) 
+static usize_t main_get_winsize(main_file *ifile)
 {
-  xoff_t file_size = 0;
-  usize_t size = XD3_DEFAULT_WINSIZE;
+	xoff_t file_size = 0;
+	usize_t size = XD3_DEFAULT_WINSIZE;
 
-  if (main_file_stat (ifile, &file_size) == 0)
-    {
-      size = (usize_t) xd3_min (file_size, (xoff_t) size);
-    }
-
-  size = xd3_max (size, XD3_ALLOCSIZE);
-  return size;
-}
-
-int main_file_exists (main_file *xfile)
-{
-  struct stat sbuf;
-  return stat (xfile->filename, & sbuf) == 0 && S_ISREG (sbuf.st_mode);
-}
-
-static int main_open_output (xd3_stream *stream, main_file *ofile)
-{
-  if (ofile->filename == NULL)
-    {
-      XSTDOUT_XF (ofile);
-    }
-  else
-    {
-      /* Stat the file to check for overwrite. */
-      if (main_file_exists (ofile))
+	if (main_file_stat(ifile, &file_size) == 0)
 	{
-	  return EEXIST;
+		size = (usize_t)xd3_min(file_size, (xoff_t)size);
 	}
-	  int ret;
-      if ((ret = main_file_open (ofile, ofile->filename, XO_WRITE)))
+
+	size = xd3_max(size, XD3_ALLOCSIZE);
+	return size;
+}
+
+int main_file_exists(main_file *xfile)
+{
+	struct stat sbuf;
+	return stat(xfile->filename, &sbuf) == 0 && S_ISREG(sbuf.st_mode);
+}
+
+static int main_open_output(xd3_stream *stream, main_file *ofile)
+{
+	if (ofile->filename == NULL)
 	{
-	  return ret;
+		XSTDOUT_XF(ofile);
 	}
-    }
-  return 0;
+	else
+	{
+		/* Stat the file to check for overwrite. */
+		if (main_file_exists(ofile))
+		{
+			return EEXIST;
+		}
+		int ret;
+		if (ret = main_file_open(ofile, ofile->filename, XO_WRITE))
+		{
+			return ret;
+		}
+	}
+	return 0;
 }
 
-static int main_write_output (xd3_stream* stream, main_file *ofile)
+static int main_write_output(xd3_stream* stream, main_file *ofile)
 {
-  int ret;
-  if (stream->avail_out > 0 &&
-      (ret = main_file_write (ofile, stream->next_out,
-			      stream->avail_out, "write failed")))
-    {
-      return ret;
-    }
+	int ret;
+	if (stream->avail_out > 0 &&
+		(ret = main_file_write(ofile, stream->next_out,
+			stream->avail_out, "write failed")))
+	{
+		return ret;
+	}
 
-  return 0;
+	return 0;
 }
 
-int main_file_close (main_file *xfile)
+int main_file_close(main_file *xfile)
 {
-  int ret = 0;
+	int ret = 0;
 
-  if (! main_file_isopen (xfile))
-    {
-      return 0;
-    }
+	if (!main_file_isopen(xfile))
+	{
+		return 0;
+	}
 
 #if XD3_STDIO
-  ret = fclose (xfile->file);
-  xfile->file = NULL;
+	ret = fclose(xfile->file);
+	xfile->file = NULL;
 
 #elif XD3_POSIX
-  ret = close (xfile->file);
-  xfile->file = -1;
+	ret = close(xfile->file);
+	xfile->file = -1;
 
 #elif XD3_WIN32
-  if (!CloseHandle(xfile->file)) {
-    ret = get_errno ();
-  }
-  xfile->file = INVALID_HANDLE_VALUE;
+	if (!CloseHandle(xfile->file)) {
+		ret = get_errno();
+	}
+	xfile->file = INVALID_HANDLE_VALUE;
 #endif
 
-  if (ret != 0) { XF_ERROR ("close", xfile->filename, ret = get_errno ()); }
-  return ret;
+	if (ret != 0) { XF_ERROR("close", xfile->filename, ret = get_errno()); }
+	return ret;
 }
 
-int main_file_isopen (main_file *xfile)
+int main_file_isopen(main_file *xfile)
 {
 #if XD3_STDIO
-  return xfile->file != NULL;
+	return xfile->file != NULL;
 
 #elif XD3_POSIX
-  return xfile->file != -1;
+	return xfile->file != -1;
 
 #elif XD3_WIN32
-  return xfile->file != INVALID_HANDLE_VALUE;
+	return xfile->file != INVALID_HANDLE_VALUE;
 #endif
 }
 
@@ -385,192 +351,195 @@ int main_file_isopen (main_file *xfile)
  * This calls the function repeatedly until the buffer is full or EOF.
  * The NREAD parameter is not set for write, NULL is passed.  Return
  * is signed, < 0 indicate errors, otherwise byte count. */
-typedef int (xd3_posix_func) (int fd, uint8_t *buf, usize_t size);
+typedef int (xd3_posix_func)(int fd, uint8_t *buf, usize_t size);
 
 static int
-xd3_posix_io (int fd, uint8_t *buf, size_t size,
-	      xd3_posix_func *func, size_t *nread)
+xd3_posix_io(int fd, uint8_t *buf, size_t size,
+	xd3_posix_func *func, size_t *nread)
 {
-  int ret;
-  size_t nproc = 0;
+	int ret;
+	size_t nproc = 0;
 
-  while (nproc < size)
-    {
-      size_t tryread = xd3_min(size - nproc, 1U << 30);
-      ssize_t result = (*func) (fd, buf + nproc, tryread);
-
-      if (result < 0)
+	while (nproc < size)
 	{
-	  ret = get_errno ();
-	  if (ret != EAGAIN && ret != EINTR)
-	    {
-	      return ret;
-	    }
-	  continue;
+		size_t tryread = xd3_min(size - nproc, 1U << 30);
+		ssize_t result = (*func)(fd, buf + nproc, tryread);
+
+		if (result < 0)
+		{
+			ret = get_errno();
+			if (ret != EAGAIN && ret != EINTR)
+			{
+				return ret;
+			}
+			continue;
+		}
+
+		if (nread != NULL && result == 0) { break; }
+
+		nproc += result;
 	}
-
-      if (nread != NULL && result == 0) { break; }
-
-      nproc += result;
-    }
-  if (nread != NULL) { (*nread) = nproc; }
-  return 0;
+	if (nread != NULL) { (*nread) = nproc; }
+	return 0;
 }
 #endif
 
 #if XD3_WIN32
-static int xd3_win32_io (HANDLE file, uint8_t *buf, size_t size,
-	      int is_read, size_t *nread)
+static int xd3_win32_io(HANDLE file, uint8_t *buf, size_t size,
+	int is_read, size_t *nread)
 {
-  int ret = 0;
-  size_t nproc = 0;
+	int ret = 0;
+	size_t nproc = 0;
 
-  while (nproc < size)
-    {
-      DWORD nproc2 = 0;  /* hmm */
-	  DWORD nremain = size - nproc;
-      if ((is_read ?
-	   ReadFile (file, buf + nproc, nremain, &nproc2, NULL) :
-	   WriteFile (file, buf + nproc, nremain, &nproc2, NULL)) == 0)
+	while (nproc < size)
 	{
-	  ret = get_errno();
-	  if (ret != ERROR_HANDLE_EOF && ret != ERROR_BROKEN_PIPE)
-	    {
-	      return ret;
-	    }
-	  /* By falling through here, we'll break this loop in the
-	   * read case in case of eof or broken pipe. */
+		DWORD nproc2 = 0;  /* hmm */
+		DWORD nremain = size - nproc;
+		if ((is_read ?
+			ReadFile(file, buf + nproc, nremain, &nproc2, NULL) :
+			WriteFile(file, buf + nproc, nremain, &nproc2, NULL)) == 0)
+		{
+			ret = get_errno();
+			if (ret != ERROR_HANDLE_EOF && ret != ERROR_BROKEN_PIPE)
+			{
+				return ret;
+			}
+			/* By falling through here, we'll break this loop in the
+			 * read case in case of eof or broken pipe. */
+		}
+
+		nproc += nproc2;
+
+		if (nread != NULL && nproc2 == 0) { break; }
 	}
-
-      nproc += nproc2;
-
-      if (nread != NULL && nproc2 == 0) { break; }
-    }
-  if (nread != NULL) { (*nread) = nproc; }
-  return 0;
+	if (nread != NULL) { (*nread) = nproc; }
+	return 0;
 }
 #endif
 
-int main_file_write (main_file *ofile, uint8_t *buf, usize_t size, const char *msg)
+int main_file_write(main_file *ofile, uint8_t *buf, usize_t size, const char *msg)
 {
-  int ret = 0;
+	int ret = 0;
 #if XD3_STDIO
-  usize_t result;
+	usize_t result;
 
-  result = fwrite (buf, 1, size, ofile->file);
+	result = fwrite(buf, 1, size, ofile->file);
 
-  if (result != size) { ret = get_errno (); }
+	if (result != size) { ret = get_errno(); }
 
 #elif XD3_POSIX
-  ret = xd3_posix_io (ofile->file, buf, size, (xd3_posix_func*) &write, NULL);
+	ret = xd3_posix_io(ofile->file, buf, size, (xd3_posix_func*)&write, NULL);
 
 #elif XD3_WIN32
-  ret = xd3_win32_io (ofile->file, buf, size, 0, NULL);
+	ret = xd3_win32_io(ofile->file, buf, size, 0, NULL);
 
 #endif
 
-  if (ret)
-    {
-      XPR(NT "%s: %s: %s\n", msg, ofile->filename, xd3_mainerror (ret));
-    }
-  else
-    {
-      ofile->nwrite += size;
-    }
+	if (ret)
+	{
+		XPR(NT "%s: %s: %s\n", msg, ofile->filename, xd3_mainerror(ret));
+	}
+	else
+	{
+		ofile->nwrite += size;
+	}
 
-  return ret;
+	return ret;
 }
 
-int main_file_read (main_file  *ifile,
-		uint8_t    *buf,
-		size_t      size,
-		size_t     *nread,
-		const char *msg)
+int main_file_read(main_file  *ifile,
+	uint8_t    *buf,
+	size_t      size,
+	size_t     *nread,
+	const char *msg)
 {
 	int ret = 0;
 
 #if XD3_STDIO
-  size_t result;
+	size_t result;
 
-  result = fread (buf, 1, size, ifile->file);
+	result = fread(buf, 1, size, ifile->file);
 
-  if (result < size && ferror (ifile->file))
-    {
-      ret = get_errno ();
-    }
-  else
-    {
-      *nread = result;
-    }
+	if (result < size && ferror(ifile->file))
+	{
+		ret = get_errno();
+	}
+	else
+	{
+		*nread = result;
+	}
 
 #elif XD3_POSIX
-  ret = xd3_posix_io (ifile->file, buf, size, (xd3_posix_func*) &read, nread);
+	ret = xd3_posix_io(ifile->file, buf, size, (xd3_posix_func*)&read, nread);
 #elif XD3_WIN32
-  ret = xd3_win32_io (ifile->file, buf, size, 1 /* is_read */, nread);
+	ret = xd3_win32_io(ifile->file, buf, size, 1 /* is_read */, nread);
 #endif
 
-  if (ret)
-    {
-      XPR(NT "%s: %s: %s\n", msg, ifile->filename, xd3_mainerror (ret));
-    }
-  else
-    {
-      ifile->nread += (*nread);
-    }
+	if (ret)
+	{
+		XPR(NT "%s: %s: %s\n", msg, ifile->filename, xd3_mainerror(ret));
+	}
+	else
+	{
+		ifile->nread += (*nread);
+	}
 
-  return ret;
+	return ret;
 }
 
-void* main_bufalloc (size_t size) {
-#if XD3_WIN32
-  return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#else
-  return main_malloc1(size);
-#endif
-}
-
-static void main_free1 (void *opaque, void *ptr)
+void* main_bufalloc(size_t size) 
 {
-  free (ptr);
-}
-
-void main_buffree (void *ptr) {
 #if XD3_WIN32
-  VirtualFree(ptr, 0, MEM_RELEASE);
+	return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
-  main_free1(NULL, ptr);
+	return main_malloc1(size);
 #endif
 }
 
-static int main_file_seek (main_file *xfile, xoff_t pos)
+static void main_free1(void *opaque, void *ptr)
 {
-  int ret = 0;
+	free(ptr);
+}
+
+void main_buffree(void *ptr) 
+{
+#if XD3_WIN32
+	VirtualFree(ptr, 0, MEM_RELEASE);
+#else
+	main_free1(NULL, ptr);
+#endif
+}
+
+static int main_file_seek(main_file *xfile, xoff_t pos)
+{
+	int ret = 0;
 
 #if XD3_STDIO
-  if (fseek (xfile->file, pos, SEEK_SET) != 0) { ret = get_errno (); }
+	if (fseek(xfile->file, pos, SEEK_SET) != 0) { ret = get_errno(); }
 
 #elif XD3_POSIX
-  if ((xoff_t) lseek (xfile->file, pos, SEEK_SET) != pos)
-    { ret = get_errno (); }
+	if ((xoff_t)lseek(xfile->file, pos, SEEK_SET) != pos)
+	{
+		ret = get_errno();
+	}
 
 #elif XD3_WIN32
 # if (_WIN32_WINNT >= 0x0500)
-  LARGE_INTEGER move, out;
-  move.QuadPart = pos;
-  if (SetFilePointerEx(xfile->file, move, &out, FILE_BEGIN) == 0)
-    {
-      ret = get_errno ();
-    }
+	LARGE_INTEGER move, out;
+	move.QuadPart = pos;
+	if (SetFilePointerEx(xfile->file, move, &out, FILE_BEGIN) == 0)
+	{
+		ret = get_errno();
+	}
 # else
-  if (SetFilePointer(xfile->file, (LONG)pos, NULL, FILE_BEGIN) ==
-      INVALID_SET_FILE_POINTER)
-    {
-      ret = get_errno ();
-    }
+	if (SetFilePointer(xfile->file, (LONG)pos, NULL, FILE_BEGIN) ==
+		INVALID_SET_FILE_POINTER)
+	{
+		ret = get_errno();
+	}
 # endif
 #endif
-
-  return ret;
+	return ret;
 }
 
 GXdelta::GXdelta() : lru(NULL), lru_size(0)
@@ -606,9 +575,7 @@ int GXdelta::diff(const string & srcFile, const string & dstFile, const string &
 	int ret = EXIT_SUCCESS;
 	if (ret = main_file_open(&pDstFile, pDstFile.filename, XO_READ))
 	{
-#if XD3_WIN32
-		GPrintf("main_file_open failure, fileName: %s, error: %d", pDstFile.filename, ret);
-#endif
+		XPR("main_file_open failure, fileName: %s, error: %d", pDstFile.filename, ret);
 		return ret;
 	}
 
@@ -621,9 +588,7 @@ int GXdelta::diff(const string & srcFile, const string & dstFile, const string &
 	if (ret = xd3_config_stream(&stream, &config))
 	{
 		cleanUp();
-#if XD3_WIN32
-		GPrintf("config_stream failure, error: %d", ret);
-#endif
+		XPR("config_stream failure, error: %d", ret);
 		return ret;
 	}
 	xd3_source source;
@@ -631,9 +596,7 @@ int GXdelta::diff(const string & srcFile, const string & dstFile, const string &
 	if (ret = main_set_source(&stream, &pSrcFile, &source))
 	{
 		cleanUp();
-#if XD3_WIN32
-		GPrintf("main_set_source failure, error: %d", ret);
-#endif
+		XPR("main_set_source failure, error: %d", ret);
 		return ret;
 	}
 	uint8_t* main_bdata = (uint8_t*)main_bufalloc(config.winsize);
@@ -643,9 +606,7 @@ int GXdelta::diff(const string & srcFile, const string & dstFile, const string &
 		usize_t try_read = config.winsize;
 		if (ret = main_file_read(&pDstFile, main_bdata, try_read, &nread, "main_file_read failure"))
 		{
-#if XD3_WIN32
-			GPrintf("main_file_read failure, fileName: %s, error: %d", pDstFile.filename, ret);
-#endif
+			XPR("main_file_read failure, fileName: %s, error: %d", pDstFile.filename, ret);
 			goto done;
 		}
 		if (nread < try_read)
@@ -671,16 +632,12 @@ int GXdelta::diff(const string & srcFile, const string & dstFile, const string &
 		{
 			if (!main_file_isopen(&pPatchFile) && (ret = main_open_output(&stream, &pPatchFile)) != 0)
 			{
-#if XD3_WIN32
-				GPrintf("main_open_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
-#endif
+				XPR("main_open_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if ((ret = main_write_output(&stream, &pPatchFile)) && (ret != PRINTHDR_SPECIAL))
 			{
-#if XD3_WIN32
-				GPrintf("main_write_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
-#endif
+				XPR("main_write_output failure, fileName: %s, error: %d", pPatchFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if (ret == PRINTHDR_SPECIAL)
@@ -706,9 +663,7 @@ done:
 	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
-#if XD3_WIN32
-		GPrintf("xd3_close_stream failure, error:%d", ret);
-#endif
+		XPR("xd3_close_stream failure, error:%d", ret);
 		return EXIT_FAILURE;
 	}
 	xd3_free_stream(&stream);
@@ -735,9 +690,7 @@ int GXdelta::patch(const string & iFileName, const string & sFileName, const str
 	int ret = EXIT_FAILURE;
 	if (ret = main_file_open(&iFile, iFile.filename, XO_READ))
 	{
-#if XD3_WIN32
-		GPrintf("main_file_open failure, fileName: %s, error: %d", iFile.filename, ret);
-#endif
+		XPR("main_file_open failure, fileName: %s, error: %d", iFile.filename, ret);
 		return ret;
 	}
 
@@ -752,9 +705,7 @@ int GXdelta::patch(const string & iFileName, const string & sFileName, const str
 	if (ret = xd3_config_stream(&stream, &config))
 	{
 		cleanUp();
-#if XD3_WIN32
-		GPrintf("config_stream failure, error: %d", ret);
-#endif
+		XPR("config_stream failure, error: %d", ret);
 		return ret;
 	}
 	xd3_source source;
@@ -766,9 +717,7 @@ int GXdelta::patch(const string & iFileName, const string & sFileName, const str
 		usize_t try_read = config.winsize;
 		if (ret = main_file_read(&iFile, main_bdata, try_read, &nread, "main_file_read failure"))
 		{
-#if XD3_WIN32
-			GPrintf("main_file_read failure, fileName: %s, error: %d", iFile.filename, ret);
-#endif
+			XPR("main_file_read failure, fileName: %s, error: %d", iFile.filename, ret);
 			goto done;
 		}
 		if (nread < try_read)
@@ -792,9 +741,7 @@ int GXdelta::patch(const string & iFileName, const string & sFileName, const str
 			if ((sFile.filename != NULL) &&
 				(ret = main_set_source(&stream, &sFile, &source)))
 			{
-#if XD3_WIN32
-				GPrintf("main_set_source failure, error: %d", ret);
-#endif
+				XPR("main_set_source failure, error: %d", ret);
 				return EXIT_FAILURE;
 			}
 		}
@@ -805,16 +752,12 @@ int GXdelta::patch(const string & iFileName, const string & sFileName, const str
 		{
 			if (!main_file_isopen(&oFile) && (ret = main_open_output(&stream, &oFile)) != 0)
 			{
-#if XD3_WIN32
-				GPrintf("main_open_output failure, fileName: %s, error: %d", oFile.filename, ret);
-#endif
+				XPR("main_open_output failure, fileName: %s, error: %d", oFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if ((ret = main_write_output(&stream, &oFile)) && (ret != PRINTHDR_SPECIAL))
 			{
-#if XD3_WIN32
-				GPrintf("main_write_output failure, fileName: %s, error: %d", oFile.filename, ret);
-#endif
+				XPR("main_write_output failure, fileName: %s, error: %d", oFile.filename, ret);
 				return EXIT_FAILURE;
 			}
 			if (ret == PRINTHDR_SPECIAL)
@@ -840,9 +783,7 @@ done:
 	cleanUp();
 	if (ret = xd3_close_stream(&stream))
 	{
-#if XD3_WIN32
-		GPrintf("xd3_close_stream failure, error:%d", ret);
-#endif
+		XPR("xd3_close_stream failure, error:%d", ret);
 		return EXIT_FAILURE;
 	}
 	xd3_free_stream(&stream);
