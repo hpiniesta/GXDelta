@@ -1,0 +1,43 @@
+# 1、准备工作，编译方式、目标文件名、依赖库路径的定义。
+CC = g++
+VER = release
+ifeq ($(VER), debug)
+CFLAGS  := -Wall -g -Ddebug -std=c++0x
+OBJS = GXdelta.do xdelta3.do
+else
+CFLAGS  := -Wall -O3 -std=c++0x
+OBJS = GXdelta.o xdelta3.o
+endif
+
+CFLAGS += -D HAVE_CONFIG_H -D XD3_POSIX
+
+#.o文件与.cpp文件同名
+
+# 目标文件名 
+LIB = GXDelta.a
+
+# 依赖的lib名称
+
+all : $(LIB)
+
+# 2. 生成.o文件 
+#%.o : %.cpp
+#    $(CC) $(CFLAGS) -c $< -o $@ $(INCLUDE_PATH) $(LIB_PATH) $(OPENCV_LIB) 
+GXdelta.o : GXdelta.cpp GXdelta.h xdelta3.h xdelta3-internal.h xdelta3-list.h
+	$(CC) $(CFLAGS) -c $< -o $@ 
+xdelta3.o : xdelta3.c xdelta3.h xdelta3-internal.h xdelta3-list.h \
+            xdelta3-hash.h xdelta3-cfgs.h xdelta3-decode.h
+	$(CC) $(CFLAGS) -c $< -o $@ 
+	
+# 3. 生成静态库文件
+$(LIB) : $(OBJS)
+	rm -f $@
+	ar cr $@ $(OBJS)
+#	rm -f $(OBJS)
+
+tags :
+	ctags -R *
+
+# 4. 删除中间过程生成的文件 
+clean:
+	rm -f $(OBJS) $(TARGET) $(LIB)

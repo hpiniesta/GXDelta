@@ -1,0 +1,38 @@
+#GXDeltaTool Makefile
+# 1、准备工作，编译方式、目标文件名、依赖库路径的定义。
+CC = g++
+VER = release
+ifeq ($(VER), debug)
+CFLAGS  := -Wall -g -Ddebug -std=c++0x
+OBJS = GXDeltaTool.do
+else
+CFLAGS  := -Wall -O3 -std=c++0x
+OBJS = GXDeltaTool.o
+endif
+CFLAGS += -D HAVE_CONFIG_H -D XD3_POSIX
+
+#.o文件
+#OBJS = GXDeltaTool.o
+
+INC_PATH += -I
+LIB_PATH += GXDelta.a
+
+# 依赖的lib名称
+
+TARGET = GXDeltaTool
+all : $(TARGET)
+
+# 2. 生成.o文件 
+$(OBJS) : GXDeltaTool.cpp
+	$(CC) $(CFLAGS) -c $^ -o $@ $(LIB_PATH)
+	
+# 3. 生成$(OBJS)可执行文件
+$(TARGET) : $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LIB_PATH)
+
+tags :
+	ctags -R *
+
+# 4. 删除中间过程生成的文件 
+clean:
+	rm -f $(OBJS) $(TARGET) $(LIB)
