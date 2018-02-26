@@ -126,7 +126,7 @@
       <PreprocessorDefinitions>WIN32;XD3_WIN32=1;_DEBUG;_CONSOLE;SIZEOF_SIZE_T=4;SIZEOF_UNSIGNED_LONG_LONG=8;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>.\xz\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
